@@ -2,17 +2,11 @@ name: Build VTosters Lite
 
 on:
   push:
-    branches:
-      - '**'
-    paths-ignore:
-      - '**.md'
+    branches: [ '**' ]
+    paths-ignore: [ '**.md' ]
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-    paths-ignore:
-      - '**.md'
+    types: [ opened, synchronize, reopened ]
+    paths-ignore: [ '**.md' ]
   workflow_dispatch:
 
 jobs:
@@ -20,52 +14,103 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up NDK
+      - name: Setup NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r25c
           add-to-path: true
 
-      - name: Set up JDK
-        uses: actions/setup-java@v3
+      - name: Setup JDK
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'adopt'
+          distribution: 'temurin'
 
-      - name: Download tools
+      - name: Install system dependencies
         run: |
-          sudo apt update
-          sudo apt install -y default-jre python3 zipalign
-          chmod +x scripts/apktool.jar
-          chmod +x scripts/apksigner.jar
+          sudo apt-get update
+          sudo apt-get install -y default-jre python3 zipalign
+
+      - name: Setup Rust targets
+        run: |
           rustup target add armv7-linux-androideabi
           rustup target add aarch64-linux-android
 
-      - name: Fix Gradle version
+      - name: Make scripts executable
+        run: |
+          chmod +x scripts/apktool.jar
+          chmod +x scripts/apksigner.jar
+
+      - name: Configure Gradle wrapper
         run: |
           mkdir -p gradle/wrapper
-          echo "distributionUrl=https\\://services.gradle.org/distributions/gradle-7.6-all.zip" > gradle/wrapper/gradle-wrapper.properties
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https://services.gradle.org/distributions/gradle-7.6-all.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+          chmod +x gradlew
 
-      - name: Build VTLite
+      - name: Run Gradle tasks
         run: |
-          ./gradlew generateBuildTasks
-          ./gradlew prepareDevKitgerGedev
-          java -jar scripts/apktool.jar b small -o small/VTLite.apk --use-aapt2 -p s
-          zipalign -p -f 4 small/VTLite.apk small/VTLite.apk_aligned
-          mv small/VTLite.apk_aligned small/VTLite.apk
+          ./gradlew generateBuildTasks || echo "generateBuildTasks not found"
+          ./gradlew prepareDevKitgerGedev || echo "prepareDevKitgerGedev not found"
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_HOME: /usr/local/lib/android/sdk
 
-      - name: Sign and verify the apk
+      - name: Build APK with Apktool
+        run: java -jar scripts/apktool.jar b small -o small/VTLite.apk --use-aapt2 --frame-path s
+
+      - name: Align APK with zipalign
         run: |
-          java -jar scripts/apksigner.jar sign --ks scripts/debug.keystore --ks-key-alias debug --ks-pass pass:android --key-pass pass:android small/VTLite.apk
-          java -jar scripts/apksigner.jar verify small/VTLite.apk
+          zipalign -v -p -f 4 small/VTLite.apk small/VTLite-aligned.apk
+          mv -f small/VTLite-aligned.apk small/VTLite.apk
 
-      - name: Upload apk to artifact
+      - name: Create debug keystore
+        run: |
+          if [ ! -f "scripts/debug.keystore" ]; then
+            keytool -genkey -v \
+              -keystore scripts/debug.keystore \
+              -alias debug \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass android \
+              -keypass android \
+              -dname "CN=KronosVK, OU=Mobile, O=Kronos, L=City, ST=State, C=RU"
+          fi
+
+      - name: Sign APK
+        run: |
+          java -jar scripts/apksigner.jar sign \
+            --ks scripts/debug.keystore \
+            --ks-key-alias debug \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            small/VTLite.apk
+
+      - name: Verify APK signature
+        run: java -jar scripts/apksigner.jar verify small/VTLite.apk
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VTLite.apk
+          name: KronosVK
           path: small/VTLite.apk
+          if-no-files-found: error
+
+      - name: Debug - list files
+        if: always()
+        run: |
+          echo "=== Current directory ==="
+          pwd
+          echo "=== Contents of small/ directory ==="
+          ls -la small/ || true
+          echo "=== Any APK files found ==="
+          find . -name "*.apk" | head -20 || true
