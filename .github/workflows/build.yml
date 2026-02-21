@@ -3,7 +3,7 @@ name: Build VTosters Lite
 on:
   push:
     branches:
-      - '*'
+      - '**'
     paths-ignore:
       - '**.md'
   pull_request:
@@ -13,7 +13,6 @@ on:
       - reopened
     paths-ignore:
       - '**.md'
-
   workflow_dispatch:
 
 jobs:
@@ -23,7 +22,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-        
+
       - name: Set up NDK
         uses: nttld/setup-ndk@v1
         with:
@@ -35,35 +34,38 @@ jobs:
         with:
           java-version: '17'
           distribution: 'adopt'
-              
+
       - name: Download tools
         run: |
           sudo apt update
-          sudo apt install default-jre
-          sudo apt install python3
-          sudo apt install zipalign
+          sudo apt install -y default-jre python3 zipalign
           chmod +x scripts/apktool.jar
           chmod +x scripts/apksigner.jar
           rustup target add armv7-linux-androideabi
-          rustup target add aarch64-linux-android 
-          
+          rustup target add aarch64-linux-android
+
+      - name: Fix Gradle version
+        run: |
+          mkdir -p gradle/wrapper
+          echo "distributionUrl=https\\://services.gradle.org/distributions/gradle-7.6-all.zip" > gradle/wrapper/gradle-wrapper.properties
+
       - name: Build VTLite
         run: |
-          gradle generateBuildTasks
-          gradle prepareDexForMergeDev
-          java -jar scripts/apktool.jar b smali -o smali/VTLite.apk --use-aapt2 -p scripts/framework/
-          zipalign -p -f 4 smali/VTLite.apk smali/VTLite.apk_aligned
-          mv smali/VTLite.apk_aligned smali/VTLite.apk
+          ./gradlew generateBuildTasks
+          ./gradlew prepareDevKitgerGedev
+          java -jar scripts/apktool.jar b small -o small/VTLite.apk --use-aapt2 -p s
+          zipalign -p -f 4 small/VTLite.apk small/VTLite.apk_aligned
+          mv small/VTLite.apk_aligned small/VTLite.apk
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
       - name: Sign and verify the apk
         run: |
-          java -jar scripts/apksigner.jar sign --ks scripts/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android smali/VTLite.apk
-          java -jar scripts/apksigner.jar verify smali/VTLite.apk
-                      
+          java -jar scripts/apksigner.jar sign --ks scripts/debug.keystore --ks-key-alias debug --ks-pass pass:android --key-pass pass:android small/VTLite.apk
+          java -jar scripts/apksigner.jar verify small/VTLite.apk
+
       - name: Upload apk to artifact
         uses: actions/upload-artifact@v4
         with:
           name: VTLite.apk
-          path: smali/VTLite.apk
+          path: small/VTLite.apk
