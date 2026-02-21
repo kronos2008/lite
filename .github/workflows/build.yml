@@ -63,7 +63,7 @@ jobs:
           java -jar scripts/apksigner.jar verify smali/VTLite.apk
                       
       - name: Upload apk to artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: VTLite.apk
           path: smali/VTLite.apk
